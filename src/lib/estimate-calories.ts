@@ -51,7 +51,7 @@ function extractJson(text: string): CalorieEstimate {
 }
 
 export const estimateCalories = createServerFn({ method: 'POST' })
-  .inputValidator((data: { imageBase64: string; mimeType: string }) => {
+  .validator((data: { imageBase64: string; mimeType: string }) => {
     if (!data || typeof data.imageBase64 !== 'string' || !data.imageBase64) {
       throw new Error('Missing image data.');
     }

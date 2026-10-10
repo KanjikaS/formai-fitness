@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export type Profile = { name: string; age: string; sex: string; level: string; conditions: string[]; other: string; complete: boolean };
 export type Macros = { protein: number; carbs: number; fat: number; fibre: number };
-export type Meal = { name: string; calories: number; type: string; source: 'photo' | 'manual'; macros: Macros; date: string };
+export type Meal = { name: string; calories: number; type: string; source: 'photo' | 'manual'; macros: Macros; date: string; photo?: string | undefined };
 type GymUser = { user_id: number; username: string } | null;
 type WeightEntry = { day: string; kg: number };
 type AppState = { profile: Profile; setProfile: (p: Profile) => void; water: number; setWater: (n: number) => void; weight: number; setWeight: (n: number) => void; weightLog: WeightEntry[]; meals: Meal[]; addMeal: (m: Meal) => void; clearMeals: (date?: string) => void; workouts: number; logWorkout: () => void; gymUser: GymUser; setGymUser: (u: GymUser) => void };
