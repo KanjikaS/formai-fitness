@@ -1,8 +1,189 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
-import { Dumbbell, HeartPulse, PersonStanding, ArrowRight, Camera, Scale, Check, ShieldCheck } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Heading, SectionTitle, Modal, WeekChart } from '@/components/formai/common';
-import { useFormAI } from '@/components/formai/state';
-export const Route=createFileRoute('/gym')({head:()=>({meta:[{title:'Gym — FormAI'},{name:'description',content:'Choose your training focus, track your weight and explore workout recording in FormAI.'},{property:'og:title',content:'Gym — FormAI'},{property:'og:description',content:'Find your rhythm and build a stronger you.'},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]}),component:Gym});
-function Gym(){const {profile,weight,setWeight,logWorkout}=useFormAI();const [focus,setFocus]=useState('');const [camera,setCamera]=useState(false);const [value,setValue]=useState(String(weight));const [saved,setSaved]=useState(false);const [logged,setLogged]=useState(false);const cautious=profile.conditions.length>0||['55–64','65+','Under 18'].includes(profile.age);const recommended=cautious?'Mobility & balance':profile.level==='Advanced'?'Strength training':'Full-body foundation';return <><Heading title="A little stronger, every day." subtitle="Your space to move, build strength, and celebrate showing up." eyebrow="GYM · MOVE WITH PURPOSE"/><SectionTitle title="Find your training focus" subtitle="Choose the kind of movement that feels right for you."><span className="demo-tag">Example suggestions</span></SectionTitle><div className="notice"><ShieldCheck size={19}/><span>Example based on your {profile.level.toLowerCase()} level and age bracket{cautious?' with a gentle approach to movement':''}. Personalization is a preview, not a medical assessment. With health concerns, ask your care team what activity is safe.</span></div><div className="training-grid">{[{title:'Full-body foundation',icon:Dumbbell,desc:'Balanced strength and simple movements to build a steady routine.'},{title:'Strength training',icon:HeartPulse,desc:'Progressive resistance and focused sessions to grow your strength.'},{title:'Mobility & balance',icon:PersonStanding,desc:'Gentle movement, flexibility and stability at your own pace.'}].map(t=><article key={t.title} className={`training-option ${focus===t.title?'chosen':''}`}><t.icon size={27}/><h3>{t.title}</h3><p>{t.desc}</p>{t.title===recommended&&<div className="demo-tag mb-4">Suggested example</div>}<Button variant={focus===t.title?'default':'outline'} onClick={()=>setFocus(t.title)}>{focus===t.title?<><Check/>Selected</>:<>Choose focus<ArrowRight/></>}</Button></article>)}</div><div className="detail-grid mt-8"><section><SectionTitle title="Your next session"/><div className="panel"><div className="flex justify-between items-center mb-5"><div><h2>{focus||recommended}</h2><p>25–35 minutes · Go at your own pace</p></div><Dumbbell size={27}/></div><div className="activity-row"><div><h4>Warm-up</h4><p>5 minutes · Gentle movement</p></div><span className="subtle-label">01</span></div><div className="activity-row"><div><h4>{focus==='Mobility & balance'?'Supported balance & mobility':'Squats, wall push-ups & glute bridges'}</h4><p>3 movements · Example workout</p></div><span className="subtle-label">02</span></div><div className="activity-row"><div><h4>Cool-down & stretch</h4><p>5 minutes · Breathe and reset</p></div><span className="subtle-label">03</span></div><div className="form-actions"><Button onClick={()=>setCamera(true)}><Camera/>Start workout</Button><Button variant="outline" disabled={logged} onClick={()=>{logWorkout();setLogged(true);}}>{logged?'Session logged': 'Log completed session'}</Button></div></div></section><section><SectionTitle title="Body weight"/><div className="panel"><div className="stat-top">Latest check-in<Scale size={18}/></div><div className="stat-value">{weight}<small>kg</small></div><p className="mt-2">Your progress is more than a number.</p><form className="inline-form" onSubmit={e=>{e.preventDefault();const n=Number(value);if(n>0&&n<650){setWeight(n);setSaved(true);}}}><label className="field">Weight (kg)<input type="number" min="1" max="649" step="0.1" required value={value} onChange={e=>{setValue(e.target.value);setSaved(false);}}/></label><Button type="submit">{saved?<Check/>:'Log weight'}</Button></form><p className="health-note">Session-only demo log</p></div><div className="mt-6"><SectionTitle title="Your week in motion"/><WeekChart/></div></section></div>{camera&&<Modal title="Your workout space" onClose={()=>setCamera(false)}><div className="camera-frame"><Camera/><span className="demo-tag">Recording preview</span><h3>Ready when you are.</h3><p>Live camera recording and form feedback will be connected in a future version. No camera is accessed or video recorded in this preview.</p></div><Button className="mt-5" onClick={()=>setCamera(false)}>Back to my workout</Button></Modal>}</>}
+import { createFileRoute } from "@tanstack/react-router";
+import { useCallback, useRef, useEffect } from "react";
+import { Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Heading, SectionTitle } from "@/components/formai/common";
+import { useFormAI } from "@/components/formai/state";
+import { useWorkout } from "@/hooks/use-workout";
+import { CameraFeed } from "@/components/formai/gym/CameraFeed";
+import { WorkoutPlanForm } from "@/components/formai/gym/WorkoutPlanForm";
+import { MetricsPanel } from "@/components/formai/gym/MetricsPanel";
+import { CoachChat, type CoachChatHandle } from "@/components/formai/gym/CoachChat";
+import { WorkoutHistory } from "@/components/formai/gym/WorkoutHistory";
+import { LoginModal } from "@/components/formai/gym/LoginModal";
+
+export const Route = createFileRoute("/gym")({
+  head: () => ({
+    meta: [
+      { title: "Gym — FormAI" },
+      { name: "description", content: "AI-powered real-time workout with pose detection and voice coaching." },
+      { property: "og:title", content: "Gym — FormAI" },
+      { property: "og:type", content: "website" },
+    ],
+  }),
+  component: Gym,
+});
+
+function Gym() {
+  const { gymUser, setGymUser } = useFormAI();
+
+  const userId = gymUser?.user_id ?? null;
+  const username = gymUser?.username ?? "";
+
+  const handleLogin = useCallback((id: number, name: string) => {
+    setGymUser({ user_id: id, username: name });
+  }, [setGymUser]);
+
+  // Workout state
+  const workout = useWorkout(userId);
+  const coachRef = useRef<CoachChatHandle>(null);
+
+  // Stop coach audio when workout ends
+  const handleEndWorkout = useCallback(() => {
+    coachRef.current?.stopAudio();
+    workout.endWorkout();
+  }, [workout]);
+
+  // Also stop audio when phase transitions away from active/completed
+  useEffect(() => {
+    if (workout.phase === "idle") {
+      coachRef.current?.stopAudio();
+    }
+  }, [workout.phase]);
+
+  if (!userId) {
+    return (
+      <>
+        <Heading
+          title="AI Real-time GYM Coach"
+          subtitle="Real-time pose detection with proactive AI voice coaching"
+          eyebrow="GYM · AI COACH"
+        />
+        <LoginModal onLogin={handleLogin} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Heading
+        title="AI Real-time GYM Coach"
+        subtitle={`Logged in as ${username} — Real-time pose detection with AI voice coaching`}
+        eyebrow="GYM · AI COACH"
+      />
+
+      {/* Workout Plan Section */}
+      <SectionTitle
+        title="Workout Plan"
+        subtitle="Choose your exercise, sets and reps, then start your workout."
+      />
+      <div className="panel">
+        <WorkoutPlanForm
+          exercise={workout.plan.exercise}
+          sets={workout.plan.sets}
+          repsPerSet={workout.plan.repsPerSet}
+          active={workout.phase === "active"}
+          onExerciseChange={(v) => workout.setPlan((p) => ({ ...p, exercise: v }))}
+          onSetsChange={(v) => workout.setPlan((p) => ({ ...p, sets: v }))}
+          onRepsChange={(v) => workout.setPlan((p) => ({ ...p, repsPerSet: v }))}
+          onStart={workout.startWorkout}
+          onEnd={handleEndWorkout}
+        />
+      </div>
+
+      {/* Camera + Metrics (visible during workout) */}
+      {workout.phase === "active" && (
+        <div className="workout-session">
+          <div className="workout-main">
+            <CameraFeed
+              exercise={workout.plan.exercise}
+              active={workout.phase === "active"}
+              onMetrics={workout.processMetrics}
+            />
+          </div>
+          <div className="workout-sidebar">
+            <MetricsPanel
+              exercise={workout.plan.exercise}
+              metrics={workout.metrics}
+              totalReps={workout.totalReps}
+              setsCompleted={workout.setsCompleted}
+              currentSetReps={workout.currentSetReps}
+              targetSets={workout.plan.sets}
+              repsPerSet={workout.plan.repsPerSet}
+            />
+            <div className="mt-4">
+              <CoachChat
+                ref={coachRef}
+                messages={workout.coachMessages}
+                exercise={workout.plan.exercise}
+                metrics={workout.metrics}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Workout complete banner */}
+      {workout.phase === "completed" && (
+        <div className="workout-complete-banner">
+          <Check size={24} />
+          <div>
+            <h3>Workout Complete! 🎉</h3>
+            <p>
+              {workout.plan.exercise} — {workout.totalReps} total reps across {workout.setsCompleted} sets.
+            </p>
+          </div>
+          <Button onClick={handleEndWorkout}>Back to Plan</Button>
+        </div>
+      )}
+
+      {/* Workout History */}
+      <div className="mt-8">
+        <SectionTitle
+          title="Workout History"
+          subtitle="Your past exercise sessions."
+        />
+        <WorkoutHistory userId={userId} />
+      </div>
+
+      <style>{`
+        .workout-active-bar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 0;
+        }
+        .workout-info {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+          font-size: 14px;
+        }
+        .workout-info strong { font-size: 16px; }
+        .workout-session {
+          display: grid;
+          grid-template-columns: 1.5fr 1fr;
+          gap: 24px;
+          margin-top: 24px;
+        }
+        .workout-main { min-width: 0; }
+        .workout-sidebar { min-width: 0; }
+        .workout-complete-banner {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          background: var(--sage);
+          border-radius: 8px;
+          padding: 20px 24px;
+          margin-top: 24px;
+        }
+        .workout-complete-banner h3 { font-size: 18px; }
+        .workout-complete-banner p { font-size: 13px; color: var(--muted-foreground); margin-top: 4px; }
+        .workout-complete-banner > div { flex: 1; }
+        @media (max-width: 900px) {
+          .workout-session { grid-template-columns: 1fr; }
+        }
+      `}</style>
+    </>
+  );
+}
