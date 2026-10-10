@@ -6,6 +6,7 @@ export type CalorieEstimate = {
   protein: number;
   carbs: number;
   fat: number;
+  fibre: number;
   notes: string;
 };
 
@@ -16,9 +17,9 @@ const MODEL = process.env['VISION_MODEL'] ?? 'global.moonshotai.kimi-k3';
 const PROMPT = [
   'You are a nutrition assistant inside a wellness app. Estimate the calories in this meal photo.',
   'Respond with ONLY compact JSON on one line, no markdown fences, in exactly this shape:',
-  '{"name": string, "calories": number, "protein": number, "carbs": number, "fat": number, "notes": string}.',
+  '{"name": string, "calories": number, "protein": number, "carbs": number, "fat": number, "fibre": number, "notes": string}.',
   '"name" is a short meal name (max 60 chars). "calories" is a realistic integer kcal estimate for',
-  'the visible portion. "protein", "carbs" and "fat" are your best macro estimates in integer grams.',
+  'the visible portion. "protein", "carbs", "fat" and "fibre" are your best macro estimates in integer grams.',
   '"notes" is one sentence (max 120 chars) naming the main items you saw and',
   'flagging that this is a rough visual estimate, not dietary advice.',
   'If the photo is not food or is unclear, still respond with your best guess and set "notes" to',
@@ -44,6 +45,7 @@ function extractJson(text: string): CalorieEstimate {
     protein: clampGrams(parsed.protein),
     carbs: clampGrams(parsed.carbs),
     fat: clampGrams(parsed.fat),
+    fibre: clampGrams(parsed.fibre),
     notes: String(parsed.notes ?? 'Rough visual estimate, not dietary advice.').slice(0, 160),
   };
 }
