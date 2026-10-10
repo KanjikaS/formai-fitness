@@ -1,24 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
-export const Route = createFileRoute("/")({
-  component: Index,
-});
-
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
-  return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
-  );
-}
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { ArrowUpRight, ArrowRight, Dumbbell, Utensils, Flower2, ChartNoAxesCombined, Leaf, Clock3, Check, Plus, Flame } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Heading, Stats, SectionTitle } from '@/components/formai/common';
+import { useFormAI } from '@/components/formai/state';
+import yogaImage from '@/assets/yoga.jpg';
+export const Route=createFileRoute('/')({head:()=>({meta:[{title:'FormAI — Your daily wellness space'},{name:'description',content:'Find your balance with gym, food, yoga and daily insights in FormAI.'},{property:'og:title',content:'FormAI — Your daily wellness space'},{property:'og:description',content:'Movement, nourishment and mindfulness, all in your daily wellness space.'},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]}),component:Home});
+const sections=[{title:'A little stronger.',label:'Gym',description:'Move with purpose. Find your rhythm.',to:'/gym',icon:Dumbbell,tone:'sage',meta:'Your next workout awaits',action:'Let’s move'},{title:'Nourish your day.',label:'Food',description:'Good food. A feel-good you.',to:'/food',icon:Utensils,tone:'pink',meta:'2 meals logged today',action:'Log a meal'},{title:'Breathe. Stretch. Reset.',label:'Yoga',description:'A moment of calm, just for you.',to:'/yoga',icon:Flower2,tone:'lilac',meta:'Find your everyday flow',action:'Find your flow'},{title:'See how far you’ve come.',label:'Insights',description:'Small wins add up to big things.',to:'/insights',icon:ChartNoAxesCombined,tone:'peach',meta:'Your progress, at a glance',action:'See my progress'}] as const;
+function Home(){const {profile,meals,water,setWater}=useFormAI();return <><Heading title={`Good morning, ${profile.name} ☀`} subtitle="A fresh day to feel a little more like your best self."/><div className="welcome-band"><div><div className="eyebrow">A LITTLE YOU-TIME</div><h2>Your wellbeing, in good company.</h2><p>Move a little. Eat well. Make space to breathe.</p></div><div className="welcome-art"><Leaf/><Button asChild><Link to={profile.complete?'/gym':'/onboarding'}>{profile.complete?'Explore your workout':'Personalize my journey'}<ArrowUpRight/></Link></Button></div></div><Stats/><SectionTitle title="Your wellness, your way" subtitle="Four little ways to take care of you."><span className="subtle-label">A balanced day starts here</span></SectionTitle><div className="wellness-grid">{sections.map(s=><article className="wellness-card" key={s.label}><div className={`wellness-card-top ${s.tone}`}><div className="category"><s.icon size={14}/>{s.label}</div><h3>{s.title}</h3><p>{s.description}</p><s.icon className="card-art"/></div><div className="card-bottom"><span className="card-meta"><Clock3 size={12}/>{s.label==='Food'?`${meals.length} meals logged today`:s.meta}</span><Link to={s.to}>{s.action}<ArrowRight size={14}/></Link></div></article>)}</div><div className="lower-grid"><section><SectionTitle title="Little wins today"><Link to="/insights" className="subtle-label">View all <ArrowUpRight size={12} className="inline"/></Link></SectionTitle><div className="activity-list"><div className="activity-row"><span className="stat-icon"><Check size={16}/></span><div><h4>Morning full-body workout</h4><p>32 minutes · A strong start</p></div><time>8:30 AM</time></div><div className="activity-row"><span className="stat-icon pink"><Utensils size={16}/></span><div><h4>{meals[0]?.name ?? 'First meal of the day'}</h4><p>{meals[0]?.calories ?? 0} kcal · Breakfast</p></div><time>9:15 AM</time></div><div className="activity-row"><span className="stat-icon lilac"><Flame size={16}/></span><div><h4>A little hydration check-in</h4><p>{water} glasses down. You’re doing great.</p></div><Button variant="ghost" size="icon" aria-label="Add a glass of water" onClick={()=>setWater(water+1)}><Plus/></Button></div></div></section><section><SectionTitle title="A moment for you"><span className="demo-tag">Curated pick</span></SectionTitle><div className="recommendation"><img src={yogaImage} alt="Gentle seated stretch in a bright studio" width={1200} height={800} loading="lazy"/></div><div className="recommendation-caption"><div><h4>Unwind with a gentle stretch</h4><p>10 min · Beginner friendly</p></div><Button variant="ghost" size="icon" asChild><Link to="/yoga" aria-label="Explore gentle yoga"><ArrowUpRight/></Link></Button></div></section></div><p className="health-note">Demo workspace · Activity and goals are sample values until you start logging.</p></>}
