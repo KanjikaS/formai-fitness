@@ -30,6 +30,13 @@ export type WorkoutPhase = "idle" | "active" | "completed";
 
 const FRAME_INTERVAL_MS = 100; // ~10 fps capture rate
 
+/** Speak payload pushed by the backend over the video WebSocket. */
+export interface SpeakPayload {
+  id: number;
+  text: string;
+  audio_base64: string | null;
+}
+
 export function useWorkout(userId: number | null) {
   const [plan, setPlan] = useState<WorkoutPlan>({
     exercise: "Squats",
@@ -49,29 +56,34 @@ export function useWorkout(userId: number | null) {
 
   // Track what we've already saved/notified
   const lastSavedSetsRef = useRef(0);
-  const lastFormCheckRef = useRef(0);
   const setCycleStartRef = useRef(Date.now());
   const workoutCompletedNotifiedRef = useRef(false);
+  // Latest speak payload id consumed from the WebSocket (dedupe).
+  const lastSpeakIdRef = useRef(0);
 
   // ── Coach event dispatcher ─────────────────────────────────────────
+  // Fire-and-forget POST for MAJOR events (workout_started,
+  // set_completed, workout_completed) — the backend generates LLM
+  // feedback asynchronously. Minor form-issue cues no longer use HTTP:
+  // the backend detects them per frame and pushes canned cues over the
+  // WebSocket itself ("speak" payloads), skipping the LLM entirely.
 
   const dispatchCoachEvent = useCallback(
-    async (event: string, currentMetrics?: Record<string, unknown>) => {
-      try {
-        const res = await getCoachFeedback({
-          event,
-          exercise: plan.exercise,
-          metrics: currentMetrics ?? metrics,
-        });
-        if (res.text) {
-          setCoachMessages((prev) => [
-            ...prev,
-            { text: res.text, audio_base64: res.audio_base64, timestamp: Date.now() },
-          ]);
-        }
-      } catch (e) {
-        console.error("Coach feedback error:", e);
-      }
+    (event: string, currentMetrics?: Record<string, unknown>) => {
+      getCoachFeedback({
+        event,
+        exercise: plan.exercise,
+        metrics: currentMetrics ?? metrics,
+      })
+        .then((res) => {
+          if (res.text) {
+            setCoachMessages((prev) => [
+              ...prev,
+              { text: res.text, audio_base64: res.audio_base64, timestamp: Date.now() },
+            ]);
+          }
+        })
+        .catch((e) => console.error("Coach feedback error:", e));
     },
     [plan.exercise, metrics],
   );
@@ -83,6 +95,7 @@ export function useWorkout(userId: number | null) {
     lastSavedSetsRef.current = 0;
     setCycleStartRef.current = Date.now();
     workoutCompletedNotifiedRef.current = false;
+    lastSpeakIdRef.current = 0;
     setCoachMessages([]);
     dispatchCoachEvent("workout_started", {});
   }, [dispatchCoachEvent]);
@@ -95,9 +108,18 @@ export function useWorkout(userId: number | null) {
   // ── Process incoming WebSocket metrics ─────────────────────────────
 
   const processMetrics = useCallback(
-    (newMetrics: WorkoutMetrics, frame?: string) => {
+    (newMetrics: WorkoutMetrics, frame?: string, speak?: SpeakPayload) => {
       setMetrics(newMetrics);
       if (frame) setAnnotatedFrame(frame);
+
+      // Instant form cue pushed over the WebSocket (dedupe by id).
+      if (speak && speak.id > lastSpeakIdRef.current) {
+        lastSpeakIdRef.current = speak.id;
+        setCoachMessages((prev) => [
+          ...prev,
+          { text: speak.text, audio_base64: speak.audio_base64, timestamp: Date.now() },
+        ]);
+      }
 
       if (phase !== "active" || !userId) return;
 
@@ -132,19 +154,8 @@ export function useWorkout(userId: number | null) {
         dispatchCoachEvent("workout_completed", newMetrics);
       }
 
-      // No pose detected notification (rate-limited by backend)
-      if (!newMetrics.pose_detected) {
-        dispatchCoachEvent("no_pose_detected", {
-          issue: "No pose detected! Please step into the camera frame.",
-        });
-      }
-
-      // Ongoing form check (throttled to every 2 seconds)
-      const now = Date.now();
-      if (now - lastFormCheckRef.current >= 2000) {
-        lastFormCheckRef.current = now;
-        dispatchCoachEvent("ongoing_form_check", newMetrics);
-      }
+      // NOTE: form issues and no-pose cues arrive via WebSocket "speak"
+      // payloads — no HTTP dispatch needed here anymore.
     },
     [phase, userId, plan, dispatchCoachEvent],
   );

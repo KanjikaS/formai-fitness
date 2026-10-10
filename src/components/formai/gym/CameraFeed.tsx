@@ -16,16 +16,23 @@ const CAPTURE_WIDTH = 640;
 const CAPTURE_HEIGHT = 480;
 const FRAME_INTERVAL_MS = 100;
 
+interface SpeakPayload {
+  id: number;
+  text: string;
+  audio_base64: string | null;
+}
+
 interface WSResponse {
   frame?: string;
   metrics?: WorkoutMetrics;
+  speak?: SpeakPayload;
   error?: string;
 }
 
 interface CameraFeedProps {
   exercise: string;
   active: boolean;
-  onMetrics: (metrics: WorkoutMetrics, frame?: string) => void;
+  onMetrics: (metrics: WorkoutMetrics, frame?: string, speak?: SpeakPayload) => void;
 }
 
 export function CameraFeed({ exercise, active, onMetrics }: CameraFeedProps) {
@@ -59,7 +66,7 @@ export function CameraFeed({ exercise, active, onMetrics }: CameraFeedProps) {
       setAnnotatedSrc(`data:image/jpeg;base64,${lastMessage.frame}`);
     }
     if (lastMessage.metrics) {
-      onMetrics(lastMessage.metrics, lastMessage.frame);
+      onMetrics(lastMessage.metrics, lastMessage.frame, lastMessage.speak);
     }
   }, [lastMessage, onMetrics]);
 

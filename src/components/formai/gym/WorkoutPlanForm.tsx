@@ -5,7 +5,8 @@
  */
 
 import { Button } from "@/components/ui/button";
-import { Play, Square } from "lucide-react";
+import { Play, Square, TriangleAlert } from "lucide-react";
+import { useFormAI } from "@/components/formai/state";
 
 const EXERCISE_OPTIONS = [
   "Squats",
@@ -38,6 +39,9 @@ export function WorkoutPlanForm({
   onStart,
   onEnd,
 }: WorkoutPlanFormProps) {
+  const { profile } = useFormAI();
+  const restricted = profile.restrictedExercises ?? [];
+  const restrictedSelected = restricted.includes(exercise);
   if (active) {
     return (
       <div className="workout-active-bar">
@@ -59,7 +63,7 @@ export function WorkoutPlanForm({
           Exercise
           <select value={exercise} onChange={(e) => onExerciseChange(e.target.value)}>
             {EXERCISE_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
+              <option key={opt} value={opt} disabled={restricted.includes(opt)}>{opt}{restricted.includes(opt) ? ' · Not recommended for you' : ''}</option>
             ))}
           </select>
         </label>
@@ -84,8 +88,19 @@ export function WorkoutPlanForm({
           />
         </label>
       </div>
+      {restricted.length > 0 && (
+        <div className="notice pink">
+          <TriangleAlert size={20} />
+          <span>
+            Based on your health profile, {restricted.join(' and ')}{' '}
+            {restricted.length > 1 ? 'are' : 'is'} not recommended — please avoid
+            these exercises, or use significantly lighter weights and stop if you
+            feel any discomfort.
+          </span>
+        </div>
+      )}
       <div className="form-actions">
-        <Button onClick={onStart}>
+        <Button onClick={onStart} disabled={restrictedSelected}>
           <Play size={16} /> Start Workout
         </Button>
       </div>
