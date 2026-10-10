@@ -1,16 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Heading, SectionTitle } from "@/components/formai/common";
 import { useFormAI } from "@/components/formai/state";
 import { useWorkout } from "@/hooks/use-workout";
+import { login } from "@/lib/api";
 import { CameraFeed } from "@/components/formai/gym/CameraFeed";
 import { WorkoutPlanForm } from "@/components/formai/gym/WorkoutPlanForm";
 import { MetricsPanel } from "@/components/formai/gym/MetricsPanel";
 import { CoachChat, type CoachChatHandle } from "@/components/formai/gym/CoachChat";
 import { WorkoutHistory } from "@/components/formai/gym/WorkoutHistory";
-import { LoginModal } from "@/components/formai/gym/LoginModal";
 
 export const Route = createFileRoute("/gym")({
   head: () => ({
@@ -25,18 +25,42 @@ export const Route = createFileRoute("/gym")({
 });
 
 function Gym() {
-  const { gymUser, setGymUser } = useFormAI();
+  const { profile, gymUser, setGymUser } = useFormAI();
+  const [loginError, setLoginError] = useState(false);
 
   const userId = gymUser?.user_id ?? null;
   const username = gymUser?.username ?? "";
 
-  const handleLogin = useCallback((id: number, name: string) => {
-    setGymUser({ user_id: id, username: name });
-  }, [setGymUser]);
-
   // Workout state
   const workout = useWorkout(userId);
   const coachRef = useRef<CoachChatHandle>(null);
+
+  // Automatically sign in as the selected profile — the backend
+  // get-or-creates a user for the username. Re-syncs when the active
+  // profile changes (e.g. switched from the Profile page).
+  useEffect(() => {
+    const name = profile.name?.trim();
+    if (!name) return;
+    if (gymUser && gymUser.username.toLowerCase() === name.toLowerCase()) {
+      setLoginError(false);
+      return;
+    }
+    // Don't switch the gym user mid-workout — history would be saved
+    // against the wrong account. The re-sync happens once it ends.
+    if (workout.phase !== "idle") return;
+    let cancelled = false;
+    setLoginError(false);
+    login(name)
+      .then((res) => {
+        if (!cancelled) setGymUser({ user_id: res.user_id, username: res.username });
+      })
+      .catch(() => {
+        if (!cancelled) setLoginError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.name, gymUser, setGymUser, workout.phase]);
 
   // Stop coach audio when workout ends
   const handleEndWorkout = useCallback(() => {
@@ -59,7 +83,17 @@ function Gym() {
           subtitle="Real-time pose detection with proactive AI voice coaching"
           eyebrow="GYM · AI COACH"
         />
-        <LoginModal onLogin={handleLogin} />
+        <div className="panel" style={{ padding: 24, marginTop: 24 }}>
+          {loginError ? (
+            <p style={{ fontSize: 14, color: "var(--destructive)", margin: 0 }}>
+              Could not connect to the server. Is the backend running?
+            </p>
+          ) : (
+            <p style={{ fontSize: 14, color: "var(--muted-foreground)", margin: 0 }}>
+              Connecting as {profile.name}…
+            </p>
+          )}
+        </div>
       </>
     );
   }

@@ -7,9 +7,10 @@
  */
 
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from "react";
-import { Bot, Mic, MicOff, Volume2 } from "lucide-react";
+import { Bot, Ear, Mic, MicOff, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { speechToText, askCoach } from "@/lib/api";
+import { useWakeWord } from "@/hooks/use-wake-word";
 import type { CoachMessage } from "@/hooks/use-workout";
 
 export interface CoachChatHandle {
@@ -23,6 +24,18 @@ interface CoachChatProps {
   metrics: Record<string, unknown>;
 }
 
+// Silence auto-stop tuning for question recording.
+/** Sample rate for the audio level monitor (ms). */
+const LEVEL_SAMPLE_MS = 100;
+/** RMS (0..1) above which audio counts as speech. */
+const SPEECH_RMS_THRESHOLD = 0.02;
+/** Min. continuous speech before silence can trigger auto-stop (ms). */
+const MIN_SPEECH_MS = 300;
+/** Continuous silence after speech that triggers auto-stop (ms). */
+const SILENCE_TIMEOUT_MS = 1500;
+/** Hard cap on a single question recording (ms). */
+const MAX_RECORDING_MS = 30_000;
+
 export const CoachChat = forwardRef<CoachChatHandle, CoachChatProps>(
   function CoachChat({ messages, exercise, metrics }, ref) {
     const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -30,6 +43,8 @@ export const CoachChat = forwardRef<CoachChatHandle, CoachChatProps>(
     const [asking, setAsking] = useState(false);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
+    const monitorIntervalRef = useRef<number | null>(null);
+    const monitorCtxRef = useRef<AudioContext | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     /** Stop and clear any playing audio. */
@@ -67,10 +82,104 @@ export const CoachChat = forwardRef<CoachChatHandle, CoachChatProps>(
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    /** Tear down the silence monitor (interval + AudioContext). */
+    const cleanupMonitor = useCallback(() => {
+      if (monitorIntervalRef.current !== null) {
+        clearInterval(monitorIntervalRef.current);
+        monitorIntervalRef.current = null;
+      }
+      if (monitorCtxRef.current) {
+        monitorCtxRef.current.close().catch(() => {});
+        monitorCtxRef.current = null;
+      }
+    }, []);
+
+    /**
+     * Stop the current recording — used by BOTH the manual "Stop" button
+     * and the silence auto-stop. Single cleanup path: tears down the
+     * monitor, then stops the MediaRecorder (its onstop handler runs the
+     * STT → askCoach → play flow).
+     */
+    const stopRecording = useCallback(() => {
+      cleanupMonitor();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      setRecording(false);
+    }, [cleanupMonitor]);
+
+    /**
+     * Monitor mic levels on the recording stream and auto-stop after a
+     * major pause: SILENCE_TIMEOUT_MS of continuous silence, but only once
+     * at least MIN_SPEECH_MS of speech has been detected (never
+     * instant-stops). A MAX_RECORDING_MS hard cap acts as a safety net.
+     */
+    const startSilenceMonitor = useCallback(
+      (stream: MediaStream) => {
+        try {
+          const Ctx =
+            window.AudioContext ??
+            (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (!Ctx) return;
+
+          const ctx = new Ctx();
+          monitorCtxRef.current = ctx;
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          ctx.createMediaStreamSource(stream).connect(analyser);
+          const samples = new Float32Array(analyser.fftSize);
+
+          let speechMs = 0;
+          let silenceMs = 0;
+          let elapsedMs = 0;
+
+          monitorIntervalRef.current = window.setInterval(() => {
+            elapsedMs += LEVEL_SAMPLE_MS;
+            if (elapsedMs >= MAX_RECORDING_MS) {
+              stopRecording();
+              return;
+            }
+
+            analyser.getFloatTimeDomainData(samples);
+            let sum = 0;
+            for (let i = 0; i < samples.length; i++) {
+              const s = samples[i] ?? 0;
+              sum += s * s;
+            }
+            const rms = Math.sqrt(sum / samples.length);
+
+            if (rms >= SPEECH_RMS_THRESHOLD) {
+              speechMs += LEVEL_SAMPLE_MS;
+              silenceMs = 0;
+            } else {
+              silenceMs += LEVEL_SAMPLE_MS;
+            }
+
+            if (speechMs >= MIN_SPEECH_MS && silenceMs >= SILENCE_TIMEOUT_MS) {
+              stopRecording();
+            }
+          }, LEVEL_SAMPLE_MS);
+        } catch {
+          // Level monitoring unavailable — recording still works with the
+          // manual Stop button.
+        }
+      },
+      [stopRecording],
+    );
+
+    // Clean up monitor + recorder on unmount.
+    useEffect(() => {
+      return () => {
+        cleanupMonitor();
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      };
+    }, [cleanupMonitor]);
+
     const toggleRecording = useCallback(async () => {
       if (recording) {
-        mediaRecorderRef.current?.stop();
-        setRecording(false);
+        stopRecording();
         return;
       }
 
@@ -111,16 +220,44 @@ export const CoachChat = forwardRef<CoachChatHandle, CoachChatProps>(
 
         recorder.start();
         setRecording(true);
+        startSilenceMonitor(stream);
       } catch (e) {
         console.error("Mic access denied:", e);
       }
-    }, [recording, exercise, metrics, stopAudio, playAudio]);
+    }, [recording, exercise, metrics, stopAudio, playAudio, stopRecording, startSilenceMonitor]);
+
+    // Wake-word: pause detection while recording/answering to avoid mic
+    // interference, then resume automatically once the answer finishes.
+    const wakePaused = recording || asking;
+    const handleWake = useCallback(() => {
+      if (wakePaused) return;
+      // Same path as the explicit "Ask Coach" button.
+      toggleRecording();
+    }, [wakePaused, toggleRecording]);
+
+    const wakeWord = useWakeWord({ onWake: handleWake, paused: wakePaused });
 
     return (
       <div className="coach-chat">
         <div className="coach-header">
           <Bot size={18} />
           <h3>AI Coach</h3>
+          <Button
+            variant={wakeWord.enabled ? "default" : "outline"}
+            size="sm"
+            onClick={wakeWord.toggle}
+            disabled={!wakeWord.isSupported}
+            title={
+              !wakeWord.isSupported
+                ? '"Hey Coach" voice activation is not supported in this browser'
+                : wakeWord.enabled
+                  ? 'Disable "Hey Coach" voice activation'
+                  : 'Enable "Hey Coach" voice activation'
+            }
+          >
+            <Ear size={14} className={wakeWord.listening ? "wake-listening" : undefined} />
+            Hey Coach
+          </Button>
           <Button
             variant={recording ? "destructive" : "outline"}
             size="sm"
@@ -201,6 +338,13 @@ export const CoachChat = forwardRef<CoachChatHandle, CoachChatProps>(
             cursor: pointer;
             color: var(--primary);
             padding: 2px;
+          }
+          .wake-listening {
+            animation: wake-pulse 1.6s ease-in-out infinite;
+          }
+          @keyframes wake-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
           }
         `}</style>
       </div>
